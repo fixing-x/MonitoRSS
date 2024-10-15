@@ -361,16 +361,23 @@ export class ArticlesService {
     }
 
     const priorArticlesStored = await this.hasPriorArticlesStored(id);
+    const allComparisonFields = [...blockingComparisons, ...passingComparisons];
 
     if (!priorArticlesStored) {
       await this.storeArticles(id, articles, {
-        comparisonFields: [...blockingComparisons, ...passingComparisons],
+        comparisonFields: allComparisonFields,
       });
 
       return {
         allArticles: articles,
         articlesToDeliver: [],
       };
+    } else {
+      await this.protectArticlesFromPrunes({
+        feedId: id,
+        articles,
+        comparisonFields: allComparisonFields,
+      });
     }
 
     const newArticles = await this.filterForNewArticles(id, articles);
@@ -394,7 +401,7 @@ export class ArticlesService {
         )
     );
 
-    const allComparisons = [...blockingComparisons, ...passingComparisons];
+    const allComparisons = allComparisonFields;
     const comparisonStorageResults = await this.areComparisonsStored(
       id,
       allComparisons
@@ -999,5 +1006,56 @@ export class ArticlesService {
     }
 
     return elem.getAttribute("href") || null;
+  }
+
+  private async protectArticlesFromPrunes({
+    feedId,
+    articles,
+    comparisonFields,
+  }: {
+    feedId: string;
+    articles: Article[];
+    comparisonFields: string[];
+  }) {
+    const valsToCheck: Array<{ name: string; value: string }> = [];
+
+    for (let i = 0; i < articles.length; ++i) {
+      const article = articles[i];
+
+      valsToCheck.push({
+        name: "id",
+        value: article.flattened.idHash,
+      });
+    }
+
+    comparisonFields.forEach((field) => {
+      for (let i = 0; i < articles.length; ++i) {
+        const article = articles[i];
+
+        const value = getNestedPrimitiveValue(article.flattened, field);
+
+        if (value) {
+          valsToCheck.push({
+            name: field,
+            value: this.getHashedArticleFieldValue(value),
+          });
+        }
+      }
+    });
+
+    try {
+      await this.partitionedFieldStoreService.reStoreOlderArticles(
+        feedId,
+        valsToCheck
+      );
+    } catch (err) {
+      logger.error("Error while protecting articles from prunes", {
+        error: (err as Error).stack,
+      });
+    }
+  }
+
+  private getHashedArticleFieldValue(val: string) {
+    return sha1.copy().update(val).digest("hex");
   }
 }

@@ -15,10 +15,12 @@ import {
 import { describe, before, after, it, beforeEach } from "node:test";
 import { FeedFetcherService } from "../src/feed-fetcher/feed-fetcher.service";
 import { DiscordMediumService } from "../src/delivery/mediums/discord-medium.service";
-import { deepStrictEqual } from "assert";
+import { deepStrictEqual, ok } from "assert";
 import testFeedV2Event from "./data/test-feed-v2-event";
 import getTestRssFeed, { DEFAULT_TEST_ARTICLES } from "./data/test-rss-feed";
 import { randomUUID } from "crypto";
+import { Connection, MikroORM } from "@mikro-orm/core";
+import dayjs from "dayjs";
 
 describe("App (e2e)", () => {
   let feedEventHandler: FeedEventHandlerService;
@@ -43,6 +45,7 @@ describe("App (e2e)", () => {
     formatArticle: async (article: Article) => article,
     close: async () => ({}),
   };
+  let connection: Connection;
 
   before(async () => {
     const { uncompiledModule, init } = await setupIntegrationTests({
@@ -57,6 +60,8 @@ describe("App (e2e)", () => {
 
     const { module } = await init();
     feedEventHandler = module.get(FeedEventHandlerService);
+    const orm = module.get(MikroORM);
+    connection = orm.em.getConnection();
   });
 
   after(async () => {
@@ -161,5 +166,25 @@ describe("App (e2e)", () => {
     );
 
     deepStrictEqual(results?.length, 1);
+  });
+
+  it("protects old articles from prunes", async () => {
+    await connection.execute(
+      `UPDATE feed_article_field_partitioned SET created_at = NOW() - INTERVAL '5 months'`
+    );
+
+    await feedEventHandler.handleV2EventWithDb(testFeedV2Event);
+
+    const results = await connection.execute(
+      `SELECT * FROM feed_article_field_partitioned`
+    );
+    const date = results[0].created_at;
+
+    ok(date);
+
+    const dateObj = dayjs(date);
+
+    ok(dateObj.isValid());
+    ok(dateObj.isAfter(dayjs().subtract(1, "month")));
   });
 });

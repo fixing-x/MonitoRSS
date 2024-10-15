@@ -106,4 +106,47 @@ export class PartitionedFeedArticleFieldStoreService {
       [feedId]
     );
   }
+
+  /**
+   * Updates the created_at of all stored fields older than 5 months to be now to prevent
+   * them from being pruned.
+   */
+  async reStoreOlderArticles(
+    feedId: string,
+    fields: Array<{ name: string; value: string }>
+  ) {
+    const connection = this.orm.em.getConnection();
+
+    const params = [
+      feedId,
+      ...fields.flatMap((field) => [field.name, field.value]),
+    ];
+
+    const monthsInterval = 4;
+
+    // check through select if any exists first
+    const [results] = await connection.execute(
+      `SELECT 1` +
+        ` FROM feed_article_field_partitioned` +
+        ` WHERE feed_id = ? AND (${fields
+          .map(() => `(field_name = ? AND field_hashed_value = ?)`)
+          .join(" OR ")})` +
+        ` AND created_at < NOW() - INTERVAL '${monthsInterval} months' LIMIT 1`,
+      params
+    );
+
+    if (!results) {
+      return;
+    }
+
+    await connection.execute(
+      `UPDATE feed_article_field_partitioned` +
+        ` SET created_at = NOW()` +
+        ` WHERE feed_id = ? AND (${fields
+          .map(() => `(field_name = ? AND field_hashed_value = ?)`)
+          .join(" OR ")})` +
+        ` AND created_at < NOW() - INTERVAL '${monthsInterval} months'`,
+      params
+    );
+  }
 }
