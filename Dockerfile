@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Copy all services into the container
-COPY . /app
+COPY . ./
 
 # Install app dependencies
 RUN npm install --production && npm cache clean --force
