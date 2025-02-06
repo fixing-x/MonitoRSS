@@ -24,11 +24,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create app directory
 WORKDIR /app
 
-# Copy all services into the container
-COPY . ./
+# Copy package.json and package-lock.json
+COPY package*.json ./
 
 # Install app dependencies
 RUN npm install --production && npm cache clean --force
+
+# Copy all other files
+COPY . ./
 
 # Expose ports for services
 EXPOSE 8000
